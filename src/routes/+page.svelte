@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import * as THREE from 'three';
 	import * as dat from 'dat.gui';
+	import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 
 	// THREE.JS setup
 	const width = window.innerWidth;
@@ -9,54 +10,102 @@
 
 	const gui: dat.GUI = new dat.GUI({ name: 'Debugging' });
 	const scene = new THREE.Scene();
-	const camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
 	const renderer = new THREE.WebGLRenderer();
 	renderer.setSize(width, height);
-	camera.position.z = 5;
+
+	const light = new THREE.HemisphereLight();
+	light.intensity = 3;
+	scene.add(light);
+
+	// Camera
+	const camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
+	camera.position.z = 50;
+	let controls = new OrbitControls(camera, renderer.domElement);
 
 	// Playground
-	let planeGeometry = { width: 1, height: 1, segments: 1, wireframe: false };
-	let previousState = structuredClone(planeGeometry);
 
 	let shape: THREE.Mesh;
+
+	let geometrySettings = {
+		size: 50,
+		segments: 16,
+		wireframe: true,
+		maxHeight: 5,
+	};
+	let previousState = structuredClone(geometrySettings);
+	let planeGeometryGUI = gui.addFolder('Plane Settings');
+	planeGeometryGUI.add(geometrySettings, 'size', 1, 100, 1);
+	planeGeometryGUI.add(geometrySettings, 'segments', 1, 64, 1);
+	planeGeometryGUI.add(geometrySettings, 'maxHeight', 0, 100, 1);
+	planeGeometryGUI.add(geometrySettings, 'wireframe');
 	renderShape();
 
-	let planeGeometryGUI = gui.addFolder('Plane settings');
-	planeGeometryGUI.add(planeGeometry, 'width', 1, 4, 1);
-	planeGeometryGUI.add(planeGeometry, 'height', 1, 4, 1);
-	planeGeometryGUI.add(planeGeometry, 'segments', 1, 10, 1);
-	planeGeometryGUI.add(planeGeometry, 'wireframe');
-
-	// Animations
-	let sphereAnimationsGUI = gui.addFolder('Sphere animation');
-	let velocity = { x: 0.01, y: 0.01 };
-	sphereAnimationsGUI.add(velocity, 'y', 0.01, 0.1);
-	sphereAnimationsGUI.add(velocity, 'x', 0.01, 0.1);
-
 	function renderShape() {
-		let previousRotation: THREE.Euler | undefined;
 		if (shape) {
-			previousRotation = new THREE.Euler(shape.rotation.x, shape.rotation.y);
 			scene.remove(shape);
 		}
 
-		const geometry = new THREE.PlaneGeometry(
-			planeGeometry.width,
-			planeGeometry.height,
-			planeGeometry.segments,
-			planeGeometry.segments,
-		);
-		const material = new THREE.MeshBasicMaterial({
-			color: 0xffff00,
-			side: THREE.DoubleSide,
-			wireframe: planeGeometry.wireframe,
-		});
-		shape = new THREE.Mesh(geometry, material);
-		if (previousRotation) {
-			shape.rotation.x = previousRotation.x + velocity.x;
-			shape.rotation.y = previousRotation.y + velocity.y;
+		const geometry = new THREE.BufferGeometry();
+		const indices = [];
+		const vertices = [];
+		const normals = [];
+		const colors = [];
+		const halfSize = geometrySettings.size / 2;
+		const segmentSize = geometrySettings.size / geometrySettings.segments;
+		const _color = new THREE.Color();
+
+		// generate vertices, normals and color data for a simple grid geometry
+		for (let i = 0; i <= geometrySettings.segments; i++) {
+			const y = i * segmentSize - halfSize;
+
+			for (let j = 0; j <= geometrySettings.segments; j++) {
+				const x = j * segmentSize - halfSize;
+
+				vertices.push(x, -y, Math.random() * geometrySettings.maxHeight);
+				normals.push(0, 0, 1);
+
+				const r = x / geometrySettings.size + 0.5;
+				const g = y / geometrySettings.size + 0.5;
+
+				_color.setRGB(r, g, 1, THREE.SRGBColorSpace);
+				colors.push(_color.r, _color.g, _color.b);
+			}
 		}
 
+		for (let i = 0; i < geometrySettings.segments; i++) {
+			for (let j = 0; j < geometrySettings.segments; j++) {
+				const a = i * (geometrySettings.segments + 1) + (j + 1);
+				const b = i * (geometrySettings.segments + 1) + j;
+				const c = (i + 1) * (geometrySettings.segments + 1) + j;
+				const d = (i + 1) * (geometrySettings.segments + 1) + (j + 1);
+
+				// generate two faces (triangles) per iteration
+
+				indices.push(a, b, d); // face one
+				indices.push(b, c, d); // face two
+			}
+		}
+
+		//
+
+		geometry.setIndex(indices);
+		geometry.setAttribute(
+			'position',
+			new THREE.Float32BufferAttribute(vertices, 3),
+		);
+		geometry.setAttribute(
+			'normal',
+			new THREE.Float32BufferAttribute(normals, 3),
+		);
+		geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+		const material = new THREE.MeshBasicMaterial({
+			side: THREE.DoubleSide,
+			vertexColors: true,
+			wireframe: geometrySettings.wireframe,
+		});
+
+		shape = new THREE.Mesh(geometry, material);
 		scene.add(shape);
 	}
 
@@ -71,17 +120,16 @@
 		return true;
 	}
 
-	function animate() {
-		if (!compareState(planeGeometry, previousState)) {
+	function update() {
+		if (!compareState(geometrySettings, previousState)) {
 			renderShape();
-			previousState = structuredClone(planeGeometry);
-		} else {
-			shape.rotation.x += velocity.x;
-			shape.rotation.y += velocity.y;
+			previousState = structuredClone(geometrySettings);
 		}
+		controls.update(0.01);
+
 		renderer.render(scene, camera);
 	}
-	renderer.setAnimationLoop(animate);
+	renderer.setAnimationLoop(update);
 
 	onMount(() => {
 		let canvasElement = document.querySelector('#canvas');
